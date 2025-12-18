@@ -108,6 +108,124 @@
             z-index: 999;
             padding: 10px;
         }
+
+        /* Responsive cho máy tính bảng */
+        @media screen and (max-width: 768px) {
+            .badge {
+                font-size: 16px;
+                padding: 8px 20px;
+                margin-bottom: 8px;
+            }
+
+            .guide {
+                font-size: 12px;
+                margin-bottom: 15px;
+                padding: 0 10px;
+            }
+
+            button {
+                padding: 12px 40px;
+                font-size: 14px;
+            }
+
+            #ui-layer {
+                bottom: 20px;
+            }
+
+            #camera-preview {
+                width: 80px;
+                height: 60px;
+                top: 10px;
+                right: 10px;
+            }
+        }
+
+        /* Responsive cho điện thoại */
+        @media screen and (max-width: 480px) {
+            .badge {
+                font-size: 14px;
+                padding: 8px 15px;
+                margin-bottom: 6px;
+                letter-spacing: 0.5px;
+            }
+
+            .guide {
+                font-size: 11px;
+                margin-bottom: 12px;
+                padding: 0 15px;
+                line-height: 1.4;
+            }
+
+            .guide b {
+                display: block;
+                margin-top: 2px;
+            }
+
+            button {
+                padding: 12px 30px;
+                font-size: 13px;
+                border-width: 2px;
+            }
+
+            #ui-layer {
+                bottom: 15px;
+                padding: 0 10px;
+            }
+
+            #camera-preview {
+                width: 100px;
+                height: 75px;
+                top: 10px;
+                right: 10px;
+                opacity: 0.8;
+            }
+
+            #error-log {
+                font-size: 11px;
+                padding: 8px;
+            }
+        }
+
+        /* Responsive cho màn hình rất nhỏ */
+        @media screen and (max-width: 360px) {
+            .badge {
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+
+            .guide {
+                font-size: 10px;
+                padding: 0 10px;
+            }
+
+            button {
+                padding: 10px 25px;
+                font-size: 12px;
+            }
+        }
+
+        /* Hỗ trợ landscape mode trên mobile */
+        @media screen and (max-height: 500px) and (orientation: landscape) {
+            #ui-layer {
+                bottom: 10px;
+            }
+
+            .badge {
+                font-size: 12px;
+                padding: 6px 15px;
+                margin-bottom: 4px;
+            }
+
+            .guide {
+                font-size: 10px;
+                margin-bottom: 8px;
+            }
+
+            button {
+                padding: 8px 25px;
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 
@@ -590,10 +708,19 @@
 
             const video = document.getElementsByClassName('input_video')[0];
             const canvas = document.getElementById('camera-preview');
-            // Set kích thước thực tế của canvas để khớp với CSS
-            canvas.width = 40;
-            canvas.height = 20;
+            // Set kích thước thực tế của canvas để khớp với CSS (responsive)
+            const canvasStyle = window.getComputedStyle(canvas);
+            canvas.width = parseInt(canvasStyle.width, 10);
+            canvas.height = parseInt(canvasStyle.height, 10);
             const ctx = canvas.getContext('2d');
+            
+            // Cập nhật lại khi resize
+            window.addEventListener('resize', () => {
+                const newWidth = parseInt(window.getComputedStyle(canvas).width, 10);
+                const newHeight = parseInt(window.getComputedStyle(canvas).height, 10);
+                canvas.width = newWidth;
+                canvas.height = newHeight;
+            });
             const statusDiv = document.getElementById('status');
 
             let frameCnt = 0;
