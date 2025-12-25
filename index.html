@@ -711,7 +711,9 @@
         const CONFIG = {
             goldCount: 2000,    // Hạt vàng
             redCount: 400,      // Số lượng đèn đỏ
+            redSize: 6.5,     // Kích thước điểm chấm đỏ (có thể chỉnh từ 1.0 đến 10.0)
             giftCount: 200,     // Số lượng hộp quà
+            giftSize: 4.0,      // Kích thước hộp quà (có thể chỉnh từ 1.0 đến 10.0)
             explodeRadius: 65,
             photoOrbitRadius: 20,
             treeHeight: 70,
@@ -726,6 +728,18 @@
         let state = 'TREE';
         let selectedIndex = 0;
         let handX = 0.5;
+        let handY = 0.5;
+        let handDetected = false;
+        let sceneRotation = { x: 0, y: 0 };
+        let lastHandX = 0.5;
+        let lastHandY = 0.5;
+        let handJustEntered = false; // Flag để phát hiện tay mới vào
+        let rotationOffset = { x: 0, y: 0 }; // Offset rotation khi tay mới vào
+
+        // Debouncing cho cử chỉ để tránh nhảy liên tục
+        let gestureStateHistory = [];
+        const GESTURE_HISTORY_SIZE = 3; // Lưu 3 frame gần nhất
+        const GESTURE_CONFIRM_THRESHOLD = 2; // Cần 2/3 frame cùng cử chỉ để xác nhận
 
         // ==========================================
         // 3. Khởi tạo 3D Scene
@@ -744,8 +758,8 @@
             container.appendChild(renderer.domElement);
 
             groupGold = createParticleSystem('gold', CONFIG.goldCount, 2.0);
-            groupRed = createParticleSystem('red', CONFIG.redCount, 3.5);
-            groupGift = createParticleSystem('gift', CONFIG.giftCount, 3.0);
+            groupRed = createParticleSystem('red', CONFIG.redCount, CONFIG.redSize);
+            groupGift = createParticleSystem('gift', CONFIG.giftCount, CONFIG.giftSize);
 
             // Tạo photos nếu đã load xong, nếu chưa sẽ được gọi từ callback
             if (photosLoaded) {
@@ -1011,9 +1025,18 @@
                 group.geometry.attributes.size.needsUpdate = true;
 
             } else {
-                // EXPLODE
+                // EXPLODE - Cải thiện với rotation mượt hơn (giống noel_v2.html)
                 group.scale.set(1, 1, 1);
-                group.rotation.y += (handRotY - group.rotation.y) * 0.1;
+                // Rotation mượt hơn với interpolation tốt hơn
+                const targetRot = handRotY;
+                group.rotation.y += (targetRot - group.rotation.y) * 0.15;
+
+                // Thêm rotation X cho hiệu ứng 3D tốt hơn
+                if (!group.userData.baseRotationX) {
+                    group.userData.baseRotationX = group.rotation.x;
+                }
+                // Có thể thêm rotation X nhẹ để tạo hiệu ứng tự nhiên hơn
+                group.rotation.x = group.userData.baseRotationX + Math.sin(time * 0.5) * 0.1;
 
                 // size, color
                 for (let i = 0; i < count; i++) {
@@ -1047,8 +1070,52 @@
 
             const currentTime = Date.now() * 0.001;
             const time = currentTime;
+            // Tính delta time an toàn
+            const dt = lastTime > 0 ? Math.min(0.016, currentTime - lastTime) : 0.016;
+            lastTime = currentTime;
             const speed = 0.06;
-            const handRotY = (handX - 0.5) * 2.5;
+
+            // Rotation Logic theo tay khi ở trạng thái EXPLODE (giống noel_v2.html)
+            if (state === 'EXPLODE') {
+                if (handDetected) {
+                    if (handJustEntered) {
+                        // Tay mới vào: Tính offset để giữ nguyên rotation hiện tại
+                        // Offset = rotation hiện tại - rotation tương ứng với vị trí tay mới
+                        const newRotY = (handX - 0.5) * Math.PI * 0.9;
+                        const newRotX = (handY - 0.5) * Math.PI * 0.25;
+                        rotationOffset.y = sceneRotation.y - newRotY;
+                        rotationOffset.x = sceneRotation.x - newRotX;
+                        handJustEntered = false;
+                    }
+
+                    // Tính target rotation dựa trên vị trí tay hiện tại + offset
+                    const targetRotY = (handX - 0.5) * Math.PI * 0.9 + rotationOffset.y;
+                    const targetRotX = (handY - 0.5) * Math.PI * 0.25 + rotationOffset.x;
+                    sceneRotation.y += (targetRotY - sceneRotation.y) * 3.0 * dt;
+                    sceneRotation.x += (targetRotX - sceneRotation.x) * 3.0 * dt;
+                    // Lưu lại vị trí tay cuối cùng
+                    lastHandX = handX;
+                    lastHandY = handY;
+                } else {
+                    // Khi không có tay: Đánh dấu để phát hiện khi tay mới vào
+                    handJustEntered = true;
+                }
+                // Khi không có tay: HOÀN TOÀN KHÔNG THAY ĐỔI sceneRotation
+                // Giữ nguyên rotation hiện tại, không reset, không interpolate
+            } else if (state === 'TREE') {
+                // Tự động quay khi ở trạng thái TREE
+                // KHÔNG reset rotation về 0, chỉ tiếp tục quay
+                sceneRotation.y += 0.3 * dt;
+                // Giữ nguyên sceneRotation.x, không reset
+            } else {
+                // Các trạng thái khác: quay chậm
+                // KHÔNG reset rotation, chỉ tiếp tục quay
+                sceneRotation.y += 0.1 * dt;
+            }
+
+            // Áp dụng rotation cho scene (thông qua camera hoặc một group container)
+            // Nếu không có container, ta sẽ áp dụng cho các groups
+            const handRotY = sceneRotation.y;
 
             // Tối ưu: chỉ update particles mỗi frame, không skip
             updateParticleGroup(groupGold, 'gold', state, speed, handRotY, time);
@@ -1091,7 +1158,8 @@
                 starMesh.visible = false;
                 loveMesh.visible = false;
 
-                const baseAngle = groupGold.rotation.y;
+                // Sử dụng sceneRotation.y thay vì groupGold.rotation.y để đồng bộ với rotation theo tay
+                const baseAngle = sceneRotation.y;
                 const photoCount = photoMeshes.length;
                 if (photoCount > 0) {
                     const angleStep = (Math.PI * 2) / photoCount;
@@ -1108,6 +1176,11 @@
                         tempVec3.set(x, y, z);
                         mesh.position.lerp(tempVec3, 0.1);
                         mesh.lookAt(camera.position);
+
+                        // Thêm rotation nhẹ cho ảnh để tạo hiệu ứng tự nhiên hơn (giống noel_v2)
+                        if (handDetected) {
+                            mesh.rotation.z += 0.01;
+                        }
 
                         if (z > maxZ) {
                             maxZ = z;
@@ -1141,7 +1214,6 @@
             }
 
             renderer.render(scene, camera);
-            lastTime = currentTime;
         }
 
         // ==========================================
@@ -1177,8 +1249,34 @@
             const statusDiv = document.getElementById('status');
 
             let frameCnt = 0;
+            // Smoothing cho hand landmarks để ổn định hơn
+            // Khởi tạo với giá trị hiện tại của handX và handY
+            let smoothedHandX = handX;
+            let smoothedHandY = handY;
+            const smoothingFactor = 0.7; // 0.7 = 70% giá trị mới, 30% giá trị cũ
+
             const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            // Cải thiện cấu hình để nhận diện tốt hơn nhưng vẫn ổn định:
+            // - modelComplexity: 1 (cân bằng giữa độ chính xác và hiệu năng)
+            // - minDetectionConfidence: 0.6 (tăng độ tin cậy nhưng không quá cao)
+            // - minTrackingConfidence: 0.6 (tăng độ tin cậy nhưng không quá cao)
+            try {
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,  // Giữ ở 1 để đảm bảo tương thích tốt
+                    minDetectionConfidence: 0.6,  // Tăng từ 0.5 lên 0.6 (vừa phải)
+                    minTrackingConfidence: 0.6   // Tăng từ 0.5 lên 0.6 (vừa phải)
+                });
+            } catch (error) {
+                console.error('Lỗi cấu hình MediaPipe:', error);
+                // Fallback về cấu hình mặc định nếu lỗi
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+            }
 
             hands.onResults(results => {
                 // Clear và vẽ với kích thước đúng của canvas
@@ -1206,12 +1304,33 @@
                 ctx.drawImage(results.image, offsetX, offsetY, drawWidth, drawHeight);
 
                 // --- Hand Logic - Check for HEART gesture first ---
+                // Chỉ nhận diện trái tim khi có đúng 2 tay và cử chỉ rõ ràng
                 if (results.multiHandLandmarks.length === 2) {
                     const h1 = results.multiHandLandmarks[0];
                     const h2 = results.multiHandLandmarks[1];
+
+                    // Kiểm tra khoảng cách giữa các ngón tay của 2 bàn tay
                     const distIndex = Math.hypot(h1[8].x - h2[8].x, h1[8].y - h2[8].y);
                     const distThumb = Math.hypot(h1[4].x - h2[4].x, h1[4].y - h2[4].y);
-                    if (distIndex < 0.15 && distThumb < 0.15) {
+                    const distMiddle = Math.hypot(h1[12].x - h2[12].x, h1[12].y - h2[12].y);
+                    const distRing = Math.hypot(h1[16].x - h2[16].x, h1[16].y - h2[16].y);
+
+                    // Kiểm tra cả 2 tay đều xòe (không nắm)
+                    const h1Tips = [h1[8], h1[12], h1[16], h1[20]];
+                    const h2Tips = [h2[8], h2[12], h2[16], h2[20]];
+                    let h1OpenDist = 0, h2OpenDist = 0;
+                    h1Tips.forEach(t => h1OpenDist += Math.hypot(t.x - h1[0].x, t.y - h1[0].y));
+                    h2Tips.forEach(t => h2OpenDist += Math.hypot(t.x - h2[0].x, t.y - h2[0].y));
+                    h1OpenDist /= 4;
+                    h2OpenDist /= 4;
+
+                    // Chỉ nhận diện trái tim khi:
+                    // 1. Các ngón tay gần nhau (tạo hình trái tim)
+                    // 2. Cả 2 tay đều xòe (không nắm)
+                    // 3. Ngưỡng chặt chẽ hơn để tránh nhận diện sai
+                    if (distIndex < 0.12 && distThumb < 0.12 &&
+                        distMiddle < 0.15 && distRing < 0.15 &&
+                        h1OpenDist > 0.3 && h2OpenDist > 0.3) {
                         state = 'HEART';
                         statusDiv.innerText = "🫶 Trái Tim Yêu Thương"; statusDiv.style.color = "#FF69B4";
                         return;
@@ -1220,7 +1339,21 @@
 
                 if (results.multiHandLandmarks.length > 0) {
                     const lm = results.multiHandLandmarks[0];
-                    handX = lm[9].x;
+                    const newHandX = lm[9].x;
+                    const newHandY = lm[9].y;
+
+                    // Phát hiện khi tay mới vào (từ không có -> có)
+                    if (!handDetected && state === 'EXPLODE') {
+                        handJustEntered = true;
+                    }
+
+                    // Smoothing để giảm nhiễu và tăng độ ổn định
+                    smoothedHandX = smoothedHandX * (1 - smoothingFactor) + newHandX * smoothingFactor;
+                    smoothedHandY = smoothedHandY * (1 - smoothingFactor) + newHandY * smoothingFactor;
+
+                    handX = smoothedHandX;
+                    handY = smoothedHandY;
+                    handDetected = true;
 
                     const tips = [8, 12, 16, 20];
                     const wrist = lm[0];
@@ -1229,29 +1362,126 @@
                     const avgDist = openDist / 4;
                     const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
 
+                    // Xác định cử chỉ hiện tại
+                    let detectedGesture = 'EXPLODE'; // Mặc định
                     if (avgDist < 0.25) {
-                        state = 'TREE';
-                        statusDiv.innerText = "✊ Thu Cây Thông"; statusDiv.style.color = "#FFD700";
+                        detectedGesture = 'TREE';
                     } else if (pinchDist < 0.05) {
-                        state = 'PHOTO';
-                        statusDiv.innerText = "👌 Xem Ảnh"; statusDiv.style.color = "#00FFFF";
+                        detectedGesture = 'PHOTO';
                     } else {
-                        state = 'EXPLODE';
-                        statusDiv.innerText = "🖐 Bung Quà & Ảnh"; statusDiv.style.color = "#FFA500";
+                        detectedGesture = 'EXPLODE';
+                    }
+
+                    // Thêm vào lịch sử và kiểm tra xác nhận
+                    gestureStateHistory.push(detectedGesture);
+                    if (gestureStateHistory.length > GESTURE_HISTORY_SIZE) {
+                        gestureStateHistory.shift(); // Xóa phần tử cũ nhất
+                    }
+
+                    // Đếm số lần xuất hiện của cử chỉ phổ biến nhất
+                    const gestureCounts = {};
+                    gestureStateHistory.forEach(g => {
+                        gestureCounts[g] = (gestureCounts[g] || 0) + 1;
+                    });
+
+                    // Lấy cử chỉ xuất hiện nhiều nhất
+                    let confirmedGesture = detectedGesture;
+                    let maxCount = 0;
+                    for (const [gesture, count] of Object.entries(gestureCounts)) {
+                        if (count > maxCount) {
+                            maxCount = count;
+                            confirmedGesture = gesture;
+                        }
+                    }
+
+                    // Chỉ thay đổi state nếu cử chỉ được xác nhận (xuất hiện đủ lần)
+                    if (maxCount >= GESTURE_CONFIRM_THRESHOLD || gestureStateHistory.length < GESTURE_HISTORY_SIZE) {
+                        if (confirmedGesture === 'TREE' && state !== 'TREE') {
+                            // Nắm tay → Thu cây
+                            const prevState = state;
+                            state = 'TREE';
+                            if (prevState !== 'TREE') {
+                                rotationOffset = { x: 0, y: 0 };
+                            }
+                            statusDiv.innerText = "✊ Thu Cây Thông"; statusDiv.style.color = "#FFD700";
+                        } else if (confirmedGesture === 'PHOTO' && state !== 'PHOTO') {
+                            // Pinch → Xem ảnh
+                            const prevState = state;
+                            state = 'PHOTO';
+                            if (prevState !== 'PHOTO') {
+                                rotationOffset = { x: 0, y: 0 };
+                            }
+                            statusDiv.innerText = "👌 Xem Ảnh"; statusDiv.style.color = "#00FFFF";
+                        } else if (confirmedGesture === 'EXPLODE' && state !== 'EXPLODE') {
+                            // Xòe tay → Bung quà
+                            state = 'EXPLODE';
+                            statusDiv.innerText = "🖐 Bung Quà & Ảnh"; statusDiv.style.color = "#FFA500";
+                        }
                     }
                 } else {
-                    state = 'TREE';
-                    statusDiv.innerText = "🎄 Giang Sinh An Lanh 🎄"; statusDiv.style.color = "#FFF";
+                    // Không phát hiện tay → Giữ nguyên trạng thái hiện tại, không tự động thu cây
+                    const wasDetected = handDetected;
+                    handDetected = false;
+
+                    // Reset lịch sử cử chỉ khi mất tay
+                    gestureStateHistory = [];
+
+                    // Giữ nguyên smoothed values khi mất tay để tránh nhảy đột ngột
+                    // Không reset smoothedHandX và smoothedHandY
+
+                    // Nếu vừa mất tay trong trạng thái EXPLODE, lưu lại vị trí cuối cùng
+                    if (wasDetected && state === 'EXPLODE') {
+                        // Giữ nguyên lastHandX và lastHandY để dùng khi tay mới vào
+                    }
+
+                    // Chỉ cập nhật status nếu đang ở trạng thái mặc định
+                    if (state === 'TREE') {
+                        statusDiv.innerText = "🎄 Giang Sinh An Lanh 🎄"; statusDiv.style.color = "#FFF";
+                    }
+                    // Không thay đổi state, giữ nguyên trạng thái hiện tại
                 }
             });
 
             const cameraUtils = new Camera(video, {
                 onFrame: async () => {
-                    frameCnt++; if (frameCnt % 3 !== 0) return;
-                    await hands.send({ image: video });
-                }, width: 320, height: 240
+                    // Giảm frame skip để xử lý nhiều frame hơn, tăng độ mượt
+                    frameCnt++;
+                    if (frameCnt % 2 !== 0) return; // Xử lý mỗi 2 frame thay vì 3
+                    try {
+                        await hands.send({ image: video });
+                    } catch (error) {
+                        console.error('Lỗi gửi frame đến MediaPipe:', error);
+                    }
+                },
+                width: 480,   // Độ phân giải vừa phải, tương thích tốt hơn
+                height: 360  // Độ phân giải vừa phải, tương thích tốt hơn
             });
-            cameraUtils.start();
+
+            try {
+                cameraUtils.start();
+            } catch (error) {
+                console.error('Lỗi khởi động camera:', error);
+                // Thử lại với độ phân giải thấp hơn nếu lỗi
+                try {
+                    const fallbackCamera = new Camera(video, {
+                        onFrame: async () => {
+                            frameCnt++;
+                            if (frameCnt % 2 !== 0) return;
+                            try {
+                                await hands.send({ image: video });
+                            } catch (err) {
+                                console.error('Lỗi gửi frame:', err);
+                            }
+                        },
+                        width: 320,
+                        height: 240
+                    });
+                    fallbackCamera.start();
+                } catch (fallbackError) {
+                    console.error('Lỗi khởi động camera với độ phân giải thấp:', fallbackError);
+                    alert('Không thể khởi động camera. Vui lòng kiểm tra quyền truy cập camera.');
+                }
+            }
         }
 
         window.addEventListener('resize', () => {
